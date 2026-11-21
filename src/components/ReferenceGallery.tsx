@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Star,
   Play,
@@ -8,10 +8,14 @@ import {
   Check,
   UploadCloud,
   RotateCcw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Collection, Language, ReferenceItem, ViewMode } from '../types/library';
 import { formatBytes } from '../utils/storage';
 import { ACD_LABELS, t } from '../i18n';
+
+const PAGE_SIZE = 60;
 
 interface ReferenceGalleryProps {
   lang: Language;
@@ -23,6 +27,13 @@ interface ReferenceGalleryProps {
   checkedIds: string[];
   playingAudioId: string | null;
   hasActiveFilters: boolean;
+  navKey: string;
+  subCategories?: Array<{ name: string; count: number }>;
+  activeSubCategory?: string;
+  showAdult?: boolean;
+  adultHiddenCount?: number;
+  onSelectSubCategory?: (sub: string) => void;
+  onToggleAdult?: () => void;
   onSelect: (id: string) => void;
   onDoubleClick: (id: string) => void;
   onToggleCheck: (id: string) => void;
@@ -44,6 +55,13 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
   checkedIds,
   playingAudioId,
   hasActiveFilters,
+  navKey,
+  subCategories = [],
+  activeSubCategory = 'all',
+  showAdult = false,
+  adultHiddenCount = 0,
+  onSelectSubCategory,
+  onToggleAdult,
   onSelect,
   onDoubleClick,
   onToggleCheck,
@@ -56,6 +74,35 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
 }) => {
   const strings = t(lang);
   const [draggingOver, setDraggingOver] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [navKey, activeSubCategory, showAdult]);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel || !root || visibleCount >= items.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => Math.min(items.length, prev + PAGE_SIZE));
+        }
+      },
+      { root, rootMargin: '320px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleCount, items.length]);
+
+  const visibleItems = items.slice(0, visibleCount);
+  const hasMore = visibleCount < items.length;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -79,6 +126,11 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
     const col = collections.find((c) => c.id === colId);
     if (!col) return '—';
     return lang === 'zh' ? col.nameZh : col.nameEn;
+  };
+
+  const getItemTypeLabel = (item: ReferenceItem) => {
+    if (item.posewearCat) return strings.posewearCategories[item.posewearCat];
+    return strings.typeNames[item.type];
   };
 
   const getLabelHex = (item: ReferenceItem) => {
@@ -234,8 +286,12 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
     );
   };
 
+  const showFilterStrip =
+    subCategories.length > 0 || adultHiddenCount > 0 || showAdult;
+
   return (
     <div
+      ref={scrollContainerRef}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -252,6 +308,69 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
               {strings.dropHintSub}
             </p>
           </div>
+        </div>
+      )}
+
+      {showFilterStrip && (
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {subCategories.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onSelectSubCategory?.('all')}
+                  className={`h-7 px-2.5 rounded-[5px] text-xs font-medium transition-colors ${
+                    activeSubCategory === 'all'
+                      ? 'bg-[#0067C0] dark:bg-[#4CC2FF] text-white dark:text-neutral-950'
+                      : 'bg-black/[0.045] dark:bg-white/[0.07] text-neutral-700 dark:text-neutral-200 hover:bg-black/[0.08] dark:hover:bg-white/[0.12]'
+                  }`}
+                >
+                  {strings.allSubCats}
+                </button>
+                {subCategories.map((sub) => (
+                  <button
+                    key={sub.name}
+                    type="button"
+                    onClick={() => onSelectSubCategory?.(sub.name)}
+                    className={`h-7 px-2.5 rounded-[5px] text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                      activeSubCategory === sub.name
+                        ? 'bg-[#0067C0] dark:bg-[#4CC2FF] text-white dark:text-neutral-950'
+                        : 'bg-black/[0.045] dark:bg-white/[0.07] text-neutral-700 dark:text-neutral-200 hover:bg-black/[0.08] dark:hover:bg-white/[0.12]'
+                    }`}
+                  >
+                    <span>{sub.name}</span>
+                    <span className="text-[10px] font-mono tabular-nums opacity-75">
+                      {sub.count}
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+
+          {(adultHiddenCount > 0 || showAdult) && onToggleAdult && (
+            <button
+              type="button"
+              onClick={onToggleAdult}
+              className={`h-7 px-2.5 rounded-[5px] text-xs font-medium flex items-center gap-1.5 border transition-colors shrink-0 ${
+                showAdult
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                  : 'border-black/[0.08] dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.05] text-neutral-600 dark:text-neutral-300 hover:border-black/20 dark:hover:border-white/20'
+              }`}
+            >
+              {showAdult ? (
+                <Eye className="w-3.5 h-3.5" />
+              ) : (
+                <EyeOff className="w-3.5 h-3.5" />
+              )}
+              <span>{strings.adultToggle}</span>
+              {!showAdult && adultHiddenCount > 0 && (
+                <span className="text-[10px] font-mono tabular-nums opacity-70">
+                  +{adultHiddenCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
       )}
 
@@ -304,7 +423,7 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-black/[0.05] dark:divide-white/[0.05] text-xs">
-              {items.map((item) => {
+              {visibleItems.map((item) => {
                 const isSelected = selectedId === item.id;
                 const isChecked = checkedIds.includes(item.id);
                 const labelHex = getLabelHex(item);
@@ -363,13 +482,18 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
                       </div>
                     </td>
                     <td className="px-3 text-neutral-500 dark:text-neutral-400 hidden sm:table-cell whitespace-nowrap">
-                      {strings.typeNames[item.type]}
+                      {getItemTypeLabel(item)}
+                      {item.subCategory ? ` · ${item.subCategory}` : ''}
                     </td>
                     <td className="px-3 hidden md:table-cell font-mono tabular-nums text-amber-500 whitespace-nowrap">
                       {item.rating ? `${item.rating} ★` : '—'}
                     </td>
                     <td className="px-3 text-neutral-500 dark:text-neutral-400 hidden xl:table-cell truncate max-w-[160px]">
-                      {item.localFolderId ? item.relativePath : getCollectionName(item.collectionId)}
+                      {item.localFolderId
+                        ? item.relativePath
+                        : item.posewearCat
+                          ? strings.posewearCategories[item.posewearCat]
+                          : getCollectionName(item.collectionId)}
                     </td>
                     <td className="px-3 text-neutral-500 dark:text-neutral-400 font-mono tabular-nums hidden lg:table-cell whitespace-nowrap">
                       {item.dimensions}
@@ -394,7 +518,7 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
               : `grid ${gridClass} gap-4`
           }
         >
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const isSelected = selectedId === item.id;
             const isChecked = checkedIds.includes(item.id);
             const labelHex = getLabelHex(item);
@@ -474,18 +598,37 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
                     </div>
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
-                    <span>{strings.typeNames[item.type]}</span>
+                    <span>{getItemTypeLabel(item)}</span>
+                    {item.subCategory && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{item.subCategory}</span>
+                      </>
+                    )}
                     <span aria-hidden="true">·</span>
                     <span className="font-mono tabular-nums">{item.dimensions}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-mono tabular-nums">
-                      {formatBytes(item.fileSizeBytes)}
-                    </span>
                   </div>
                 </div>
               </article>
             );
           })}
+        </div>
+      )}
+
+      {hasMore && (
+        <div
+          ref={loadMoreSentinelRef}
+          className="py-6 flex items-center justify-center"
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setVisibleCount((prev) => Math.min(items.length, prev + PAGE_SIZE))
+            }
+            className="h-8 px-4 rounded-[5px] border border-black/10 dark:border-white/15 bg-white/80 dark:bg-[#2B2B2B] text-xs font-medium text-neutral-700 dark:text-neutral-200 hover:border-[#0067C0] dark:hover:border-[#4CC2FF] transition-colors font-mono tabular-nums"
+          >
+            {strings.loadMore} ({visibleCount} / {items.length})
+          </button>
         </div>
       )}
     </div>

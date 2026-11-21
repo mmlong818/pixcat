@@ -1,5 +1,7 @@
 export type AssetType = 'web' | 'ui' | 'motion' | 'print' | 'audio' | 'doc';
 
+export type PoseWearCategory = 'pose' | 'depth' | 'costume' | 'anime' | 'portrait';
+
 export type AcdLabel = 'none' | 'red' | 'yellow' | 'green' | 'blue' | 'purple';
 
 export type ViewMode = 'masonry' | 'grid' | 'list';
@@ -14,10 +16,10 @@ export interface ImageAdjustments {
   rotate: 0 | 90 | 180 | 270;
   flipH: boolean;
   flipV: boolean;
-  brightness: number; // 50 - 150 (100 default)
-  contrast: number; // 50 - 150 (100 default)
-  saturate: number; // 0 - 200 (100 default)
-  warmth: number; // -50 - 50 (0 default)
+  brightness: number;
+  contrast: number;
+  saturate: number;
+  warmth: number;
   grayscale: boolean;
 }
 
@@ -39,8 +41,17 @@ export interface LocalFolder {
   mountedAt: string;
 }
 
+export interface PoseAngle {
+  zh: string;
+  en: string;
+  thumbUrl: string;
+  highResUrl: string;
+  originalUrl?: string;
+}
+
 export type ActiveNav =
   | { kind: 'library'; filter: 'all' | 'starred' | AssetType }
+  | { kind: 'posewear'; category: PoseWearCategory }
   | { kind: 'collection'; collectionId: string }
   | { kind: 'local-folder'; folderId: string }
   | { kind: 'rating'; minRating: number }
@@ -52,6 +63,8 @@ export interface ReferenceItem {
   title: string;
   type: AssetType;
   imageUrl?: string;
+  highResUrl?: string;
+  originalUrl?: string;
   mediaUrl?: string;
   mediaMime?: string;
   sourceUrl?: string;
@@ -60,18 +73,42 @@ export interface ReferenceItem {
   localFolderId?: string;
   relativePath?: string;
   tags: string[];
+  keywords?: string[];
   colors: string[];
   dimensions: string;
   fileSizeBytes: number;
   createdAt: string;
   starred: boolean;
-  rating?: number; // 0 - 5
+  rating?: number;
   acdLabel?: AcdLabel;
   notes: string;
   docContent?: string;
   audioPreset?: 'fluent-chime' | 'ambient-pad' | 'tactile-click';
   durationSec?: number;
   adjustments?: ImageAdjustments;
+  // PoseWear extended metadata
+  posewearCat?: PoseWearCategory;
+  itemCode?: string;
+  subCategory?: string;
+  promptZh?: string;
+  promptEn?: string;
+  titleJa?: string;
+  angles?: PoseAngle[];
+  activeAngleIndex?: number;
+  isAdult?: boolean;
+}
+
+export interface PoseWearItemOverride {
+  title?: string;
+  starred?: boolean;
+  rating?: number;
+  acdLabel?: AcdLabel;
+  tags?: string[];
+  notes?: string;
+  collectionId?: string;
+  activeAngleIndex?: number;
+  adjustments?: ImageAdjustments;
+  hidden?: boolean;
 }
 
 export interface Collection {

@@ -46,9 +46,37 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,webp,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,webp,woff2,json}'],
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/posewear-assets-96b\.pages\.dev\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'posewear-assets-cache',
+                expiration: {
+                  maxEntries: 2000,
+                  maxAgeSeconds: 60 * 60 * 24 * 90,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/ai-pose-depth-gallery\.pages\.dev\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'pose-depth-assets-cache',
+                expiration: {
+                  maxEntries: 1000,
+                  maxAgeSeconds: 60 * 60 * 24 * 90,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

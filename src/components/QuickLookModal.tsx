@@ -22,6 +22,7 @@ import {
   FileText,
   ExternalLink,
   Eye,
+  Copy,
 } from 'lucide-react';
 import {
   AcdLabel,
@@ -111,9 +112,11 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
     if (currentIndex < 0) return;
     [currentIndex - 1, currentIndex + 1, currentIndex + 2].forEach((idx) => {
       const target = items[idx];
-      if (target?.imageUrl) {
+      const src = target?.highResUrl || target?.imageUrl;
+      if (src) {
         const pre = new Image();
-        pre.src = target.imageUrl;
+        pre.referrerPolicy = 'no-referrer';
+        pre.src = src;
       }
     });
   }, [currentIndex, items]);
@@ -277,9 +280,10 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
   };
 
   const handleExportEdited = async (saveToLibrary: boolean) => {
-    if (!item.imageUrl) return;
+    const targetSrc = item.highResUrl || item.imageUrl;
+    if (!targetSrc) return;
     try {
-      const canvas = await renderAdjustedCanvas(item.imageUrl, adj, cropAspect);
+      const canvas = await renderAdjustedCanvas(targetSrc, adj, cropAspect);
       const blob = await canvasToBlob(canvas, exportFormat, exportQuality / 100);
       const ext =
         exportFormat === 'image/png'
@@ -313,7 +317,15 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
         );
       }
     } catch {
-      onNotify(lang === 'zh' ? '图像处理失败' : 'Image processing error');
+      onNotify(
+        item.originalUrl
+          ? lang === 'zh'
+            ? '远程图库受跨域限制无法像素导出，请在右侧点击「下载原图 PNG」'
+            : 'Remote CDN blocks Canvas export; use Download Original PNG on the right'
+          : lang === 'zh'
+            ? '图像处理失败'
+            : 'Image processing error'
+      );
     }
   };
 
@@ -589,7 +601,7 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
           {item.imageUrl ? (
             <div className="w-full h-full flex items-center justify-center p-4">
               <img
-                src={item.imageUrl}
+                src={item.highResUrl || item.imageUrl}
                 alt={item.title}
                 draggable={false}
                 referrerPolicy="no-referrer"
@@ -617,6 +629,29 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
                     : 'max-w-none'
                 }`}
               />
+              {item.angles && item.angles.length > 0 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 px-2 py-1.5 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 flex items-center gap-1">
+                  {item.angles.map((ang, idx) => {
+                    const active = (item.activeAngleIndex ?? 0) === idx;
+                    return (
+                      <button
+                        key={`${ang.zh}-${idx}`}
+                        type="button"
+                        onClick={() =>
+                          onUpdateItem(item.id, { activeAngleIndex: idx })
+                        }
+                        className={`h-7 px-2.5 rounded text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-[#4CC2FF] text-neutral-950 font-semibold'
+                            : 'text-neutral-200 hover:bg-white/10'
+                        }`}
+                      >
+                        {lang === 'zh' ? ang.zh : ang.en}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : item.mediaUrl && item.mediaMime?.startsWith('video/') ? (
             <video src={item.mediaUrl} controls autoPlay className="max-w-[90%] max-h-[85%] rounded shadow-2xl" />
@@ -920,14 +955,88 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
                   </div>
                 </div>
 
+                {(item.promptZh || item.promptEn || (item.keywords && item.keywords.length > 0)) && (
+                  <div className="space-y-3 pt-2 border-t border-white/[0.08]">
+                    {item.promptZh && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-semibold text-neutral-400">
+                            {strings.promptZhLabel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(item.promptZh!).catch(() => {});
+                              onNotify(strings.copiedText(strings.promptZhLabel));
+                            }}
+                            className="text-[11px] text-[#4CC2FF] hover:underline flex items-center gap-1"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{lang === 'zh' ? '复制' : 'Copy'}</span>
+                          </button>
+                        </div>
+                        <p className="text-xs leading-relaxed text-neutral-200 select-text">
+                          {item.promptZh}
+                        </p>
+                      </div>
+                    )}
+                    {item.promptEn && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-semibold text-neutral-400">
+                            {strings.promptEnLabel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(item.promptEn!).catch(() => {});
+                              onNotify(strings.copiedText(strings.promptEnLabel));
+                            }}
+                            className="text-[11px] text-[#4CC2FF] hover:underline flex items-center gap-1"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{lang === 'zh' ? '复制' : 'Copy'}</span>
+                          </button>
+                        </div>
+                        <p className="text-xs leading-relaxed font-mono text-neutral-300 select-text">
+                          {item.promptEn}
+                        </p>
+                      </div>
+                    )}
+                    {item.keywords && item.keywords.length > 0 && (
+                      <div>
+                        <div className="text-[11px] font-semibold text-neutral-400 mb-1">
+                          {strings.keywordsLabel}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-neutral-400 select-text break-words">
+                          {item.keywords.join(' · ')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <div className="text-[11px] font-semibold text-neutral-400 mb-1.5">
                     {strings.notesLabel}
                   </div>
-                  <p className="text-xs leading-relaxed text-neutral-300">
+                  <p className="text-xs leading-relaxed text-neutral-300 whitespace-pre-line">
                     {item.notes || '—'}
                   </p>
                 </div>
+
+                {item.originalUrl && (
+                  <a
+                    href={item.originalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={`${item.itemCode || item.title}.png`}
+                    className="w-full h-8 rounded bg-[#4CC2FF] hover:bg-[#3BB5F5] text-neutral-950 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{strings.downloadOriginal}</span>
+                  </a>
+                )}
 
                 {item.sourceUrl && (
                   <a
@@ -946,37 +1055,39 @@ export const QuickLookModal: React.FC<QuickLookModalProps> = ({
         )}
       </div>
 
-      {/* Bottom ACDSee Filmstrip Thumbnail Strip */}
+      {/* Bottom ACDSee Filmstrip Thumbnail Strip (windowed around active item) */}
       {showFilmstrip && items.length > 1 && (
         <div className="h-20 px-3 bg-[#1A1C20] border-t border-white/[0.08] flex items-center gap-2 overflow-x-auto win-scroll shrink-0">
-          {items.map((thumb) => {
-            const active = thumb.id === item.id;
-            return (
-              <button
-                key={thumb.id}
-                type="button"
-                onClick={() => onJumpTo(thumb.id)}
-                className={`relative h-14 w-20 rounded-[4px] overflow-hidden shrink-0 border-2 transition-all ${
-                  active
-                    ? 'border-[#4CC2FF] scale-105'
-                    : 'border-transparent opacity-60 hover:opacity-100'
-                }`}
-              >
-                {thumb.imageUrl ? (
-                  <img
-                    src={thumb.imageUrl}
-                    alt={thumb.title}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-[#2A2D34] flex items-center justify-center text-[10px] font-mono text-neutral-300">
-                    {thumb.type.toUpperCase()}
-                  </div>
-                )}
-              </button>
-            );
-          })}
+          {items
+            .slice(Math.max(0, currentIndex - 20), Math.min(items.length, currentIndex + 21))
+            .map((thumb) => {
+              const active = thumb.id === item.id;
+              return (
+                <button
+                  key={thumb.id}
+                  type="button"
+                  onClick={() => onJumpTo(thumb.id)}
+                  className={`relative h-14 w-20 rounded-[4px] overflow-hidden shrink-0 border-2 transition-all ${
+                    active
+                      ? 'border-[#4CC2FF] scale-105'
+                      : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  {thumb.imageUrl ? (
+                    <img
+                      src={thumb.imageUrl}
+                      alt={thumb.title}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-[#2A2D34] flex items-center justify-center text-[10px] font-mono text-neutral-300">
+                      {thumb.type.toUpperCase()}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
         </div>
       )}
     </div>

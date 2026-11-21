@@ -57,17 +57,27 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   const matchedItems = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items.slice(0, 5);
-    return items
-      .filter(
-        (i) =>
-          i.title.toLowerCase().includes(q) ||
-          i.tags.some((tag) => tag.toLowerCase().includes(q)) ||
-          i.notes.toLowerCase().includes(q) ||
-          (i.domain && i.domain.toLowerCase().includes(q)) ||
-          i.colors.some((c) => c.toLowerCase().includes(q))
-      )
-      .slice(0, 6);
+    if (!q) return items.slice(0, 6);
+    const out: ReferenceItem[] = [];
+    for (const i of items) {
+      if (
+        i.title.toLowerCase().includes(q) ||
+        i.tags.some((tag) => tag.toLowerCase().includes(q)) ||
+        (i.keywords && i.keywords.some((kw) => kw.toLowerCase().includes(q))) ||
+        (i.itemCode && i.itemCode.toLowerCase().includes(q)) ||
+        (i.subCategory && i.subCategory.toLowerCase().includes(q)) ||
+        (i.promptZh && i.promptZh.toLowerCase().includes(q)) ||
+        (i.promptEn && i.promptEn.toLowerCase().includes(q)) ||
+        (i.titleJa && i.titleJa.toLowerCase().includes(q)) ||
+        i.notes.toLowerCase().includes(q) ||
+        (i.domain && i.domain.toLowerCase().includes(q)) ||
+        i.colors.some((c) => c.toLowerCase().includes(q))
+      ) {
+        out.push(i);
+        if (out.length >= 10) break;
+      }
+    }
+    return out;
   }, [items, query]);
 
   const matchedCollections = useMemo(() => {
@@ -244,7 +254,9 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                       <span className="truncate font-medium">{item.title}</span>
                     </span>
                     <span className="text-[11px] text-neutral-400 shrink-0">
-                      {strings.typeNames[item.type]}
+                      {item.posewearCat
+                        ? strings.posewearCategories[item.posewearCat]
+                        : strings.typeNames[item.type]}
                     </span>
                   </button>
                 ))}

@@ -5,6 +5,7 @@ import {
   Collection,
   Language,
   LocalFolder,
+  PoseWearItemOverride,
   ReferenceItem,
   SortMode,
   ViewMode,
@@ -28,6 +29,7 @@ import {
   fileToLocalDiskItem,
   pickLocalDirectoryViaFS,
 } from './utils/imageOps';
+import { loadPoseWearDatasets } from './utils/posewearLoader';
 import { playSynthPreset, stopSynthAudio } from './utils/audioSynth';
 import { useOnlineStatus, usePWAInstall } from './hooks/usePWA';
 import { ACD_LABELS, t } from './i18n';
@@ -52,20 +54,26 @@ export default function App() {
   const { isInstallable, isInstalled, offlineReady, install } = usePWAInstall();
   const isOnline = useOnlineStatus();
 
-  const [items, setItems] = useState<ReferenceItem[]>(INITIAL_ITEMS);
+  const [customItems, setCustomItems] = useState<ReferenceItem[]>(INITIAL_ITEMS);
+  const [posewearItems, setPosewearItems] = useState<ReferenceItem[]>([]);
+  const [posewearOverrides, setPosewearOverrides] = useState<
+    Record<string, PoseWearItemOverride>
+  >({});
   const [collections, setCollections] =
     useState<Collection[]>(INITIAL_COLLECTIONS);
   const [localFolders, setLocalFolders] = useState<LocalFolder[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   const [navHistory, setNavHistory] = useState<ActiveNav[]>([
-    { kind: 'library', filter: 'all' },
+    { kind: 'posewear', category: 'pose' },
   ]);
   const [historyIdx, setHistoryIdx] = useState(0);
   const activeNav = navHistory[historyIdx];
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeColorId, setActiveColorId] = useState('all');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('all');
+  const [showAdult, setShowAdult] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('masonry');
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [gridCols, setGridCols] = useState<number>(4);
@@ -90,6 +98,11 @@ export default function App() {
   const dirInputRef = useRef<HTMLInputElement>(null);
   const strings = t(lang);
 
+  const items = useMemo(
+    () => [...customItems, ...posewearItems],
+    [customItems, posewearItems]
+  );
+
   const notify = useCallback((msg: string) => {
     setToast(msg);
   }, []);
@@ -106,11 +119,10 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    loadWorkspace().then((stored) => {
+    loadWorkspace().then(async (stored) => {
       if (!mounted) return;
       if (stored && Array.isArray(stored.items) && stored.items.length > 0) {
-        setItems(stored.items);
-        setSelectedId(stored.items[0]?.id ?? null);
+        setCustomItems(stored.items);
       }
       if (
         stored &&
@@ -119,7 +131,28 @@ export default function App() {
       ) {
         setCollections(stored.collections);
       }
+      const overrides = stored?.posewearOverrides || {};
+      setPosewearOverrides(overrides);
       setHydrated(true);
+
+      try {
+        const bundle = await loadPoseWearDatasets(overrides);
+        if (!mounted) return;
+        const combined = [
+          ...bundle.pose,
+          ...bundle.depth,
+          ...bundle.costume,
+          ...bundle.anime,
+          ...bundle.portrait,
+        ];
+        setPosewearItems(combined);
+        const firstSafePose = bundle.pose.find((p) => !p.isAdult) || bundle.pose[0];
+        if (firstSafePose) {
+          setSelectedId(firstSafePose.id);
+        }
+      } catch {
+        // PoseWear datasets unavailable offline before precache
+      }
     });
     return () => {
       mounted = false;
@@ -127,16 +160,17 @@ export default function App() {
     };
   }, []);
 
-  // Persist persistent items (exclude transient ObjectURL disk folder mounts)
+  // Persist custom items, collections, and PoseWear user overrides (exclude transient ObjectURL disk mounts)
   useEffect(() => {
     if (!hydrated) return;
-    const persistentItems = items.filter((i) => !i.localFolderId);
+    const persistentItems = customItems.filter((i) => !i.localFolderId);
     saveWorkspace({
       items: persistentItems,
       collections,
+      posewearOverrides,
       updatedAt: new Date().toISOString(),
     });
-  }, [items, collections, hydrated]);
+  }, [customItems, collections, posewearOverrides, hydrated]);
 
   const navigateTo = useCallback(
     (next: ActiveNav) => {
@@ -146,28 +180,67 @@ export default function App() {
       });
       setHistoryIdx((idx) => idx + 1);
       setCheckedIds([]);
+      setSubCategoryFilter('all');
     },
     [historyIdx]
   );
 
-  // Filtered & sorted items
-  const filteredItems = useMemo(() => {
-    let list = [...items];
-
+  // Base category items (before 18+ filter and sub-category filter)
+  const baseNavItems = useMemo(() => {
+    if (activeNav.kind === 'posewear') {
+      return items.filter((i) => i.posewearCat === activeNav.category);
+    }
     if (activeNav.kind === 'library') {
       if (activeNav.filter === 'starred') {
-        list = list.filter((i) => i.starred);
-      } else if (activeNav.filter !== 'all') {
-        list = list.filter((i) => i.type === activeNav.filter);
+        return items.filter((i) => i.starred);
       }
-    } else if (activeNav.kind === 'collection') {
-      list = list.filter((i) => i.collectionId === activeNav.collectionId);
-    } else if (activeNav.kind === 'local-folder') {
-      list = list.filter((i) => i.localFolderId === activeNav.folderId);
-    } else if (activeNav.kind === 'rating') {
-      list = list.filter((i) => (i.rating || 0) >= activeNav.minRating);
-    } else if (activeNav.kind === 'label') {
-      list = list.filter((i) => i.acdLabel === activeNav.label);
+      if (activeNav.filter !== 'all') {
+        return items.filter((i) => !i.posewearCat && i.type === activeNav.filter);
+      }
+      return items;
+    }
+    if (activeNav.kind === 'collection') {
+      return items.filter((i) => i.collectionId === activeNav.collectionId);
+    }
+    if (activeNav.kind === 'local-folder') {
+      return items.filter((i) => i.localFolderId === activeNav.folderId);
+    }
+    if (activeNav.kind === 'rating') {
+      return items.filter((i) => (i.rating || 0) >= activeNav.minRating);
+    }
+    if (activeNav.kind === 'label') {
+      return items.filter((i) => i.acdLabel === activeNav.label);
+    }
+    return items;
+  }, [items, activeNav]);
+
+  const adultHiddenCount = useMemo(
+    () => baseNavItems.filter((i) => i.isAdult).length,
+    [baseNavItems]
+  );
+
+  const adultFilteredItems = useMemo(
+    () => (showAdult ? baseNavItems : baseNavItems.filter((i) => !i.isAdult)),
+    [baseNavItems, showAdult]
+  );
+
+  const subCategories = useMemo(() => {
+    if (activeNav.kind !== 'posewear') return [];
+    const counts = new Map<string, number>();
+    for (const item of adultFilteredItems) {
+      if (item.subCategory) {
+        counts.set(item.subCategory, (counts.get(item.subCategory) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+  }, [activeNav.kind, adultFilteredItems]);
+
+  // Filtered & sorted items
+  const filteredItems = useMemo(() => {
+    let list = adultFilteredItems;
+
+    if (activeNav.kind === 'posewear' && subCategoryFilter !== 'all') {
+      list = list.filter((i) => i.subCategory === subCategoryFilter);
     }
 
     if (activeColorId !== 'all') {
@@ -186,13 +259,20 @@ export default function App() {
           i.title.toLowerCase().includes(q) ||
           i.notes.toLowerCase().includes(q) ||
           i.tags.some((tag) => tag.toLowerCase().includes(q)) ||
+          (i.keywords && i.keywords.some((kw) => kw.toLowerCase().includes(q))) ||
+          (i.itemCode && i.itemCode.toLowerCase().includes(q)) ||
+          (i.subCategory && i.subCategory.toLowerCase().includes(q)) ||
+          (i.promptZh && i.promptZh.toLowerCase().includes(q)) ||
+          (i.promptEn && i.promptEn.toLowerCase().includes(q)) ||
+          (i.titleJa && i.titleJa.toLowerCase().includes(q)) ||
           (i.relativePath && i.relativePath.toLowerCase().includes(q)) ||
           (i.domain && i.domain.toLowerCase().includes(q)) ||
           i.colors.some((c) => c.toLowerCase().includes(q))
       );
     }
 
-    list.sort((a, b) => {
+    const sorted = [...list];
+    sorted.sort((a, b) => {
       if (sortMode === 'newest') return b.createdAt.localeCompare(a.createdAt);
       if (sortMode === 'rating') return (b.rating || 0) - (a.rating || 0);
       if (sortMode === 'name') return a.title.localeCompare(b.title);
@@ -200,8 +280,15 @@ export default function App() {
       return a.type.localeCompare(b.type);
     });
 
-    return list;
-  }, [items, activeNav, activeColorId, searchQuery, sortMode]);
+    return sorted;
+  }, [
+    adultFilteredItems,
+    activeNav.kind,
+    subCategoryFilter,
+    activeColorId,
+    searchQuery,
+    sortMode,
+  ]);
 
   const selectedItem = useMemo(
     () => items.find((i) => i.id === selectedId) || null,
@@ -236,7 +323,7 @@ export default function App() {
           return;
         }
         setLocalFolders((prev) => [result.folder, ...prev]);
-        setItems((prev) => [...result.items, ...prev]);
+        setCustomItems((prev) => [...result.items, ...prev]);
         setSelectedId(result.items[0].id);
         navigateTo({ kind: 'local-folder', folderId: result.folder.id });
         notify(
@@ -286,7 +373,7 @@ export default function App() {
       mountedAt: new Date().toISOString(),
     };
     setLocalFolders((prev) => [folder, ...prev]);
-    setItems((prev) => [...created, ...prev]);
+    setCustomItems((prev) => [...created, ...prev]);
     setSelectedId(created[0].id);
     navigateTo({ kind: 'local-folder', folderId });
     notify(
@@ -391,7 +478,7 @@ export default function App() {
       }
 
       if (created.length > 0) {
-        setItems((prev) => [...created, ...prev]);
+        setCustomItems((prev) => [...created, ...prev]);
         setSelectedId(created[0].id);
         notify(
           lang === 'zh'
@@ -401,6 +488,71 @@ export default function App() {
       }
     },
     [activeCollectionId, lang, notify]
+  );
+
+  const handleUpdateItem = useCallback(
+    (id: string, patch: Partial<ReferenceItem>) => {
+      if (id.startsWith('pw-')) {
+        setPosewearItems((prev) =>
+          prev.map((item) => {
+            if (item.id !== id) return item;
+            let nextPatch = { ...patch };
+            if (
+              patch.activeAngleIndex !== undefined &&
+              item.angles &&
+              item.angles[patch.activeAngleIndex]
+            ) {
+              const ang = item.angles[patch.activeAngleIndex];
+              nextPatch = {
+                ...nextPatch,
+                imageUrl: ang.thumbUrl,
+                highResUrl: ang.highResUrl,
+                originalUrl: ang.originalUrl,
+              };
+            }
+            return { ...item, ...nextPatch };
+          })
+        );
+        setPosewearOverrides((prev) => {
+          const cur = prev[id] || {};
+          const nextOv: PoseWearItemOverride = { ...cur };
+          if (patch.title !== undefined) nextOv.title = patch.title;
+          if (patch.starred !== undefined) nextOv.starred = patch.starred;
+          if (patch.rating !== undefined) nextOv.rating = patch.rating;
+          if (patch.acdLabel !== undefined) nextOv.acdLabel = patch.acdLabel;
+          if (patch.tags !== undefined) nextOv.tags = patch.tags;
+          if (patch.notes !== undefined) nextOv.notes = patch.notes;
+          if (patch.collectionId !== undefined) nextOv.collectionId = patch.collectionId;
+          if (patch.activeAngleIndex !== undefined)
+            nextOv.activeAngleIndex = patch.activeAngleIndex;
+          if (patch.adjustments !== undefined) nextOv.adjustments = patch.adjustments;
+          return { ...prev, [id]: nextOv };
+        });
+      } else {
+        setCustomItems((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+        );
+      }
+    },
+    []
+  );
+
+  const handleDeleteItem = useCallback(
+    (id: string) => {
+      if (id.startsWith('pw-')) {
+        setPosewearItems((prev) => prev.filter((i) => i.id !== id));
+        setPosewearOverrides((prev) => ({
+          ...prev,
+          [id]: { ...(prev[id] || {}), hidden: true },
+        }));
+      } else {
+        setCustomItems((prev) => prev.filter((i) => i.id !== id));
+      }
+      if (selectedId === id) setSelectedId(null);
+      setCheckedIds((prev) => prev.filter((x) => x !== id));
+      notify(lang === 'zh' ? '已从参考库移除' : 'Removed from library');
+    },
+    [selectedId, lang, notify]
   );
 
   // Global keyboard shortcuts (Ctrl+K, Space QuickLook, 1-5 Rating, Ctrl+V Paste, Delete)
@@ -429,22 +581,20 @@ export default function App() {
         }
       } else if (['1', '2', '3', '4', '5'].includes(e.key) && selectedId) {
         const rating = Number(e.key);
-        setItems((prev) =>
-          prev.map((i) => (i.id === selectedId ? { ...i, rating } : i))
-        );
+        handleUpdateItem(selectedId, { rating });
         notify(lang === 'zh' ? `已设为 ${rating} 星评级` : `Rated ${rating} stars`);
       } else if (e.key === 'Delete' && activeNav.kind !== 'windows-info') {
         if (checkedIds.length > 0) {
-          setItems((prev) => prev.filter((i) => !checkedIds.includes(i.id)));
+          const idsToRemove = [...checkedIds];
+          idsToRemove.forEach((id) => handleDeleteItem(id));
           setCheckedIds([]);
           notify(
             lang === 'zh'
-              ? `已移除 ${checkedIds.length} 项`
-              : `Removed ${checkedIds.length} items`
+              ? `已移除 ${idsToRemove.length} 项`
+              : `Removed ${idsToRemove.length} items`
           );
         } else if (selectedId) {
-          setItems((prev) => prev.filter((i) => i.id !== selectedId));
-          setSelectedId(null);
+          handleDeleteItem(selectedId);
         }
       }
     };
@@ -500,7 +650,7 @@ export default function App() {
           acdLabel: 'none',
           notes: '',
         };
-        setItems((prev) => [newItem, ...prev]);
+        setCustomItems((prev) => [newItem, ...prev]);
         setSelectedId(newItem.id);
         notify(lang === 'zh' ? `已捕获网址 ${domain}` : `Captured URL ${domain}`);
       }
@@ -523,6 +673,8 @@ export default function App() {
     activeNav.kind,
     activeCollectionId,
     handleImportFiles,
+    handleUpdateItem,
+    handleDeleteItem,
     lang,
     notify,
   ]);
@@ -548,43 +700,27 @@ export default function App() {
     [playingAudioId]
   );
 
-  const handleUpdateItem = useCallback(
-    (id: string, patch: Partial<ReferenceItem>) => {
-      setItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
-      );
-    },
-    []
-  );
-
   const handleSaveEditedCopy = useCallback(
     (source: ReferenceItem, dataUrl: string, sizeBytes: number, dimensions: string) => {
       const copyItem: ReferenceItem = {
         ...source,
+        posewearCat: undefined,
+        angles: undefined,
         id: `ref-${Date.now()}`,
         title: `${source.title} (${lang === 'zh' ? '已编辑' : 'Edited'})`,
         imageUrl: dataUrl,
+        highResUrl: dataUrl,
         localFolderId: undefined,
         dimensions,
         fileSizeBytes: sizeBytes,
         createdAt: new Date().toISOString(),
         adjustments: undefined,
       };
-      setItems((prev) => [copyItem, ...prev]);
+      setCustomItems((prev) => [copyItem, ...prev]);
       setQuickLookId(copyItem.id);
       setSelectedId(copyItem.id);
     },
     [lang]
-  );
-
-  const handleDeleteItem = useCallback(
-    (id: string) => {
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      if (selectedId === id) setSelectedId(null);
-      setCheckedIds((prev) => prev.filter((x) => x !== id));
-      notify(lang === 'zh' ? '已从参考库移除' : 'Removed from library');
-    },
-    [selectedId, lang, notify]
   );
 
   const handleCreateCollection = useCallback(
@@ -643,7 +779,7 @@ export default function App() {
         notes: payload.notes,
         docContent: payload.docContent,
       };
-      setItems((prev) => [newItem, ...prev]);
+      setCustomItems((prev) => [newItem, ...prev]);
       setSelectedId(newItem.id);
       notify(lang === 'zh' ? '已保存新参考' : 'Reference saved');
     },
@@ -651,9 +787,15 @@ export default function App() {
   );
 
   const handleExportBackup = () => {
-    const persistentItems = items.filter((i) => !i.localFolderId);
+    const persistentItems = customItems.filter((i) => !i.localFolderId);
     const blob = new Blob(
-      [JSON.stringify({ items: persistentItems, collections }, null, 2)],
+      [
+        JSON.stringify(
+          { items: persistentItems, collections, posewearOverrides },
+          null,
+          2
+        ),
+      ],
       { type: 'application/json' }
     );
     const url = URL.createObjectURL(blob);
@@ -669,8 +811,19 @@ export default function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed.items)) setItems(parsed.items);
+      if (Array.isArray(parsed.items)) setCustomItems(parsed.items);
       if (Array.isArray(parsed.collections)) setCollections(parsed.collections);
+      if (parsed.posewearOverrides && typeof parsed.posewearOverrides === 'object') {
+        setPosewearOverrides(parsed.posewearOverrides);
+        const bundle = await loadPoseWearDatasets(parsed.posewearOverrides);
+        setPosewearItems([
+          ...bundle.pose,
+          ...bundle.depth,
+          ...bundle.costume,
+          ...bundle.anime,
+          ...bundle.portrait,
+        ]);
+      }
       notify(lang === 'zh' ? '已恢复备份库数据' : 'Restored library from backup');
     } catch {
       notify(lang === 'zh' ? '备份文件格式无效' : 'Invalid backup JSON');
@@ -680,17 +833,30 @@ export default function App() {
   const handleResetLibrary = async () => {
     await clearWorkspace();
     setLocalFolders([]);
-    setItems(INITIAL_ITEMS);
+    setCustomItems(INITIAL_ITEMS);
     setCollections(INITIAL_COLLECTIONS);
+    setPosewearOverrides({});
+    const bundle = await loadPoseWearDatasets({}).catch(() => null);
+    if (bundle) {
+      setPosewearItems([
+        ...bundle.pose,
+        ...bundle.depth,
+        ...bundle.costume,
+        ...bundle.anime,
+        ...bundle.portrait,
+      ]);
+    }
     setSelectedId(INITIAL_ITEMS[0].id);
     notify(lang === 'zh' ? '已恢复默认示例库' : 'Reset to default library');
   };
 
   const handleDownloadItem = (item: ReferenceItem) => {
-    const href = item.imageUrl || item.mediaUrl;
+    const href = item.originalUrl || item.highResUrl || item.imageUrl || item.mediaUrl;
     if (href) {
       const a = document.createElement('a');
       a.href = href;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
       a.download = item.title;
       a.click();
     } else if (item.docContent) {
@@ -722,6 +888,9 @@ export default function App() {
 
   const breadcrumb = useMemo(() => {
     if (activeNav.kind === 'windows-info') return strings.windowsEdition;
+    if (activeNav.kind === 'posewear') {
+      return `${strings.posewearSection} / ${strings.posewearCategories[activeNav.category]}`;
+    }
     if (activeNav.kind === 'collection') {
       const col = collections.find((c) => c.id === activeNav.collectionId);
       return col ? (lang === 'zh' ? col.nameZh : col.nameEn) : strings.collections;
@@ -858,6 +1027,7 @@ export default function App() {
               collections={collections}
               localFolders={localFolders}
               activeColorId={activeColorId}
+              showAdult={showAdult}
               onSelectNav={navigateTo}
               onSelectColor={setActiveColorId}
               onCreateCollection={handleCreateCollection}
@@ -881,6 +1051,7 @@ export default function App() {
                   collections={collections}
                   localFolders={localFolders}
                   activeColorId={activeColorId}
+                  showAdult={showAdult}
                   onSelectNav={(nav) => {
                     navigateTo(nav);
                     setMobileSidebarOpen(false);
@@ -933,17 +1104,13 @@ export default function App() {
                   onChangeGridCols={setGridCols}
                   onToggleInspector={() => setInspectorOpen((o) => !o)}
                   onBulkStar={() => {
-                    setItems((prev) =>
-                      prev.map((i) =>
-                        checkedIds.includes(i.id) ? { ...i, starred: true } : i
-                      )
+                    checkedIds.forEach((id) =>
+                      handleUpdateItem(id, { starred: true })
                     );
                     setCheckedIds([]);
                   }}
                   onBulkDelete={() => {
-                    setItems((prev) =>
-                      prev.filter((i) => !checkedIds.includes(i.id))
-                    );
+                    checkedIds.forEach((id) => handleDeleteItem(id));
                     setCheckedIds([]);
                   }}
                   onOpenBatchTools={() => setBatchOpen(true)}
@@ -961,8 +1128,17 @@ export default function App() {
                   checkedIds={checkedIds}
                   playingAudioId={playingAudioId}
                   hasActiveFilters={
-                    searchQuery.trim().length > 0 || activeColorId !== 'all'
+                    searchQuery.trim().length > 0 ||
+                    activeColorId !== 'all' ||
+                    subCategoryFilter !== 'all'
                   }
+                  navKey={`${JSON.stringify(activeNav)}-${searchQuery}-${activeColorId}-${sortMode}`}
+                  subCategories={subCategories}
+                  activeSubCategory={subCategoryFilter}
+                  showAdult={showAdult}
+                  adultHiddenCount={adultHiddenCount}
+                  onSelectSubCategory={setSubCategoryFilter}
+                  onToggleAdult={() => setShowAdult((v) => !v)}
                   onSelect={setSelectedId}
                   onDoubleClick={(id) => setQuickLookId(id)}
                   onToggleCheck={(id) =>
@@ -972,13 +1148,12 @@ export default function App() {
                         : [...prev, id]
                     )
                   }
-                  onToggleStar={(id) =>
-                    setItems((prev) =>
-                      prev.map((i) =>
-                        i.id === id ? { ...i, starred: !i.starred } : i
-                      )
-                    )
-                  }
+                  onToggleStar={(id) => {
+                    const target = items.find((x) => x.id === id);
+                    if (target) {
+                      handleUpdateItem(id, { starred: !target.starred });
+                    }
+                  }}
                   onPlayAudio={handlePlayAudio}
                   onContextMenu={(e, item) => {
                     e.preventDefault();
@@ -989,7 +1164,7 @@ export default function App() {
                   onResetFilters={() => {
                     setSearchQuery('');
                     setActiveColorId('all');
-                    navigateTo({ kind: 'library', filter: 'all' });
+                    setSubCategoryFilter('all');
                   }}
                   onDropFiles={(files) => handleImportFiles(files)}
                 />
@@ -1049,10 +1224,7 @@ export default function App() {
         selectedItems={checkedItemsList}
         onClose={() => setBatchOpen(false)}
         onBatchRename={(updates) => {
-          const map = new Map(updates.map((u) => [u.id, u.title]));
-          setItems((prev) =>
-            prev.map((i) => (map.has(i.id) ? { ...i, title: map.get(i.id)! } : i))
-          );
+          updates.forEach((u) => handleUpdateItem(u.id, { title: u.title }));
         }}
         onNotify={notify}
       />
@@ -1065,8 +1237,14 @@ export default function App() {
         collections={collections}
         onClose={() => setCommandOpen(false)}
         onSelectItem={(id) => {
+          const target = items.find((i) => i.id === id);
           setSelectedId(id);
-          navigateTo({ kind: 'library', filter: 'all' });
+          if (target?.isAdult) setShowAdult(true);
+          if (target?.posewearCat) {
+            navigateTo({ kind: 'posewear', category: target.posewearCat });
+          } else {
+            navigateTo({ kind: 'library', filter: 'all' });
+          }
         }}
         onSelectNav={navigateTo}
         onToggleDark={() => setDark((d) => !d)}
@@ -1092,13 +1270,10 @@ export default function App() {
         lang={lang}
         onClose={() => setContextMenu(null)}
         onQuickLook={(id) => setQuickLookId(id)}
-        onToggleStar={(id) =>
-          setItems((prev) =>
-            prev.map((i) =>
-              i.id === id ? { ...i, starred: !i.starred } : i
-            )
-          )
-        }
+        onToggleStar={(id) => {
+          const target = items.find((x) => x.id === id);
+          if (target) handleUpdateItem(id, { starred: !target.starred });
+        }}
         onCopyLink={async (item) => {
           if (item.sourceUrl) {
             await navigator.clipboard.writeText(item.sourceUrl).catch(() => {});

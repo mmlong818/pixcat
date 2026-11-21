@@ -10,6 +10,7 @@ import {
   Play,
   Pause,
   FileText,
+  Download,
 } from 'lucide-react';
 import { AcdLabel, Collection, Language, ReferenceItem } from '../types/library';
 import { formatBytes } from '../utils/storage';
@@ -152,6 +153,49 @@ export const InspectorPane: React.FC<InspectorPaneProps> = ({
             />
           </button>
         </div>
+
+        {/* Multi-angle switcher for PoseWear poses */}
+        {item.angles && item.angles.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">
+              {strings.anglesLabel}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {item.angles.map((ang, idx) => {
+                const isActive = (item.activeAngleIndex ?? 0) === idx;
+                return (
+                  <button
+                    key={`${ang.zh}-${idx}`}
+                    type="button"
+                    onClick={() =>
+                      onUpdateItem(item.id, { activeAngleIndex: idx })
+                    }
+                    className={`h-6 px-2 rounded-[4px] text-[11px] font-medium transition-colors ${
+                      isActive
+                        ? 'bg-[#0067C0] dark:bg-[#4CC2FF] text-white dark:text-neutral-950'
+                        : 'bg-black/[0.05] dark:bg-white/[0.08] text-neutral-700 dark:text-neutral-200 hover:bg-black/[0.09] dark:hover:bg-white/[0.14]'
+                    }`}
+                  >
+                    {lang === 'zh' ? ang.zh : ang.en}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {item.originalUrl && (
+          <a
+            href={item.originalUrl}
+            target="_blank"
+            rel="noreferrer"
+            download={`${item.itemCode || item.title}.png`}
+            className="mt-3 w-full h-8 rounded-[5px] bg-[#0067C0]/10 dark:bg-[#4CC2FF]/15 text-[#0067C0] dark:text-[#4CC2FF] hover:bg-[#0067C0]/20 dark:hover:bg-[#4CC2FF]/25 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{strings.downloadOriginal}</span>
+          </a>
+        )}
       </div>
 
       {/* ACDSee Rating & Color Label */}
@@ -257,6 +301,11 @@ export const InspectorPane: React.FC<InspectorPaneProps> = ({
             }
             className="w-full h-8 px-2.5 text-xs rounded-[5px] bg-white dark:bg-[#2F2F2F] border border-black/[0.09] dark:border-white/[0.09] text-neutral-800 dark:text-neutral-100 focus:outline-none focus:border-[#0067C0] dark:focus:border-[#4CC2FF]"
           >
+            {item.posewearCat && (
+              <option value={`col-pw-${item.posewearCat}`}>
+                {strings.posewearSection} · {strings.posewearCategories[item.posewearCat]}
+              </option>
+            )}
             {collections.map((col) => (
               <option key={col.id} value={col.id}>
                 {lang === 'zh' ? col.nameZh : col.nameEn}
@@ -350,6 +399,94 @@ export const InspectorPane: React.FC<InspectorPaneProps> = ({
         </form>
       </div>
 
+      {/* PoseWear Original Prompts & Keywords */}
+      {(item.promptZh || item.promptEn || item.titleJa || (item.keywords && item.keywords.length > 0)) && (
+        <div className="p-4 border-b border-black/[0.06] dark:border-white/[0.06] space-y-3">
+          {item.promptZh && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                  {strings.promptZhLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(item.promptZh!, strings.copiedText(strings.promptZhLabel))
+                  }
+                  className="text-[11px] text-[#0067C0] dark:text-[#4CC2FF] hover:underline flex items-center gap-1"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{lang === 'zh' ? '复制' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed text-neutral-700 dark:text-neutral-200 select-text">
+                {item.promptZh}
+              </p>
+            </div>
+          )}
+
+          {item.promptEn && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                  {strings.promptEnLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(item.promptEn!, strings.copiedText(strings.promptEnLabel))
+                  }
+                  className="text-[11px] text-[#0067C0] dark:text-[#4CC2FF] hover:underline flex items-center gap-1"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{lang === 'zh' ? '复制' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed font-mono text-neutral-600 dark:text-neutral-300 select-text">
+                {item.promptEn}
+              </p>
+            </div>
+          )}
+
+          {item.titleJa && (
+            <div>
+              <span className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-0.5">
+                {strings.titleJaLabel}
+              </span>
+              <p className="text-xs text-neutral-600 dark:text-neutral-300 select-text">
+                {item.titleJa}
+              </p>
+            </div>
+          )}
+
+          {item.keywords && item.keywords.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                  {strings.keywordsLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      item.keywords!.join(', '),
+                      strings.copiedText(strings.keywordsLabel)
+                    )
+                  }
+                  className="text-[11px] text-[#0067C0] dark:text-[#4CC2FF] hover:underline flex items-center gap-1"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{lang === 'zh' ? '复制' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400 select-text break-words">
+                {item.keywords.join(' · ')}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Notes */}
       <div className="p-4 border-b border-black/[0.06] dark:border-white/[0.06]">
         <label className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">
@@ -372,7 +509,10 @@ export const InspectorPane: React.FC<InspectorPaneProps> = ({
         <div className="grid grid-cols-2 gap-y-1.5 text-[11px]">
           <span className="text-neutral-400 dark:text-neutral-500">{strings.typeLabel}</span>
           <span className="text-right text-neutral-700 dark:text-neutral-200">
-            {strings.typeNames[item.type]}
+            {item.posewearCat
+              ? strings.posewearCategories[item.posewearCat]
+              : strings.typeNames[item.type]}
+            {item.subCategory ? ` · ${item.subCategory}` : ''}
           </span>
           <span className="text-neutral-400 dark:text-neutral-500">
             {strings.dimensionsLabel}

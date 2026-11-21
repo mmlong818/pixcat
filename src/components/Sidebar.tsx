@@ -15,6 +15,11 @@ import {
   Check,
   X,
   HardDrive,
+  PersonStanding,
+  Scan,
+  Shirt,
+  Sparkles,
+  UserSquare2,
 } from 'lucide-react';
 import {
   ActiveNav,
@@ -22,6 +27,7 @@ import {
   Collection,
   Language,
   LocalFolder,
+  PoseWearCategory,
   ReferenceItem,
 } from '../types/library';
 import { COLOR_FILTERS } from '../data/seedLibrary';
@@ -34,6 +40,7 @@ interface SidebarProps {
   collections: Collection[];
   localFolders: LocalFolder[];
   activeColorId: string;
+  showAdult: boolean;
   onSelectNav: (nav: ActiveNav) => void;
   onSelectColor: (colorId: string) => void;
   onCreateCollection: (name: string) => void;
@@ -47,6 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collections,
   localFolders,
   activeColorId,
+  showAdult,
   onSelectNav,
   onSelectColor,
   onCreateCollection,
@@ -56,11 +64,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [creatingCol, setCreatingCol] = useState(false);
   const [newColName, setNewColName] = useState('');
 
+  const visibleItems = items.filter((i) => showAdult || !i.isAdult);
+
   const countByFilter = (filter: 'all' | 'starred' | AssetType) => {
-    if (filter === 'all') return items.length;
-    if (filter === 'starred') return items.filter((i) => i.starred).length;
-    return items.filter((i) => i.type === filter).length;
+    if (filter === 'all') return visibleItems.length;
+    if (filter === 'starred') return visibleItems.filter((i) => i.starred).length;
+    return visibleItems.filter((i) => !i.posewearCat && i.type === filter).length;
   };
+
+  const countByPoseWear = (category: PoseWearCategory) =>
+    visibleItems.filter((i) => i.posewearCat === category).length;
+
+  const posewearRows: Array<{
+    category: PoseWearCategory;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = [
+    { category: 'pose', label: strings.posewearCategories.pose, icon: PersonStanding },
+    { category: 'depth', label: strings.posewearCategories.depth, icon: Scan },
+    { category: 'costume', label: strings.posewearCategories.costume, icon: Shirt },
+    { category: 'anime', label: strings.posewearCategories.anime, icon: Sparkles },
+    { category: 'portrait', label: strings.posewearCategories.portrait, icon: UserSquare2 },
+  ];
 
   const libraryRows: Array<{
     filter: 'all' | 'starred' | AssetType;
@@ -68,13 +93,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     icon: React.ComponentType<{ className?: string }>;
   }> = [
     { filter: 'all', label: strings.allItems, icon: Layers },
+    { filter: 'starred', label: strings.starred, icon: Star },
     { filter: 'web', label: strings.web, icon: Globe },
     { filter: 'ui', label: strings.ui, icon: LayoutGrid },
     { filter: 'motion', label: strings.motion, icon: Film },
     { filter: 'print', label: strings.print, icon: Printer },
     { filter: 'audio', label: strings.audio, icon: Volume2 },
     { filter: 'doc', label: strings.doc, icon: FileText },
-    { filter: 'starred', label: strings.starred, icon: Star },
   ];
 
   const handleSubmitCol = (e: React.FormEvent) => {
@@ -162,6 +187,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
+        {/* PoseWear Collection Section */}
+        <div>
+          <div className="px-2.5 mb-1.5 text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+            {strings.posewearSection}
+          </div>
+          <nav className="space-y-0.5">
+            {posewearRows.map((row) => {
+              const Icon = row.icon;
+              const isActive =
+                activeNav.kind === 'posewear' && activeNav.category === row.category;
+              const count = countByPoseWear(row.category);
+              return (
+                <button
+                  key={row.category}
+                  type="button"
+                  onClick={() =>
+                    onSelectNav({ kind: 'posewear', category: row.category })
+                  }
+                  className={`relative w-full h-8 px-2.5 rounded-[5px] flex items-center justify-between text-[13px] transition-colors ${
+                    isActive
+                      ? 'bg-black/[0.055] dark:bg-white/[0.08] font-medium text-neutral-950 dark:text-white'
+                      : 'text-neutral-700 dark:text-neutral-300 hover:bg-black/[0.035] dark:hover:bg-white/[0.05]'
+                  }`}
+                >
+                  {isActive && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-0.5 top-2 bottom-2 w-[3px] rounded-full bg-[#0067C0] dark:bg-[#4CC2FF]"
+                    />
+                  )}
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive
+                          ? 'text-[#0067C0] dark:text-[#4CC2FF]'
+                          : 'text-neutral-500 dark:text-neutral-400'
+                      }`}
+                    />
+                    <span className="truncate">{row.label}</span>
+                  </span>
+                  <span className="text-[11px] font-mono tabular-nums text-neutral-400 dark:text-neutral-500 ml-2 shrink-0">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
         {/* Library Section */}
         <div>
           <div className="px-2.5 mb-1.5 text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
@@ -220,7 +294,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {[5, 4].map((minRating) => {
               const isActive =
                 activeNav.kind === 'rating' && activeNav.minRating === minRating;
-              const count = items.filter((i) => (i.rating || 0) >= minRating).length;
+              const count = visibleItems.filter((i) => (i.rating || 0) >= minRating).length;
               return (
                 <button
                   key={minRating}

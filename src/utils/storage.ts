@@ -1,4 +1,4 @@
-import { Collection, ReferenceItem } from '../types/library';
+import { Collection, PoseWearItemOverride, ReferenceItem } from '../types/library';
 
 const DB_NAME = 'pixcat_windows_local_db';
 const DB_VERSION = 1;
@@ -7,6 +7,7 @@ const STORE_NAME = 'workspace';
 export interface StoredWorkspace {
   items: ReferenceItem[];
   collections: Collection[];
+  posewearOverrides?: Record<string, PoseWearItemOverride>;
   updatedAt: string;
 }
 
