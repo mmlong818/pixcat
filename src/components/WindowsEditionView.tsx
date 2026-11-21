@@ -10,7 +10,7 @@ import {
   FolderOpen,
   CheckCircle2,
 } from 'lucide-react';
-import { Collection, Language, ReferenceItem } from '../types/refto';
+import { Collection, Language, ReferenceItem } from '../types/library';
 import { formatBytes } from '../utils/storage';
 
 interface WindowsEditionViewProps {
@@ -105,7 +105,7 @@ export const WindowsEditionView: React.FC<WindowsEditionViewProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-[#0067C0] dark:text-[#4CC2FF] mb-2">
               <Monitor className="w-4 h-4" />
-              <span>Refto · Windows Offline & ACDSee Edition</span>
+              <span>PixCat · Windows Offline & ACDSee Edition</span>
             </div>
             <h1 className="font-display font-bold text-2xl md:text-3xl tracking-tight text-neutral-900 dark:text-white">
               {lang === 'zh'
@@ -286,7 +286,7 @@ export const WindowsEditionView: React.FC<WindowsEditionViewProps> = ({
               </p>
               <p>
                 {lang === 'zh'
-                  ? '2. 安装后将在 Windows 开始菜单与桌面生成独立「Refto」程序图标，以独立无地址栏窗口启动，并在完全断网下正常工作。'
+                  ? '2. 安装后将在 Windows 开始菜单与桌面生成独立「PixCat」程序图标，以独立无地址栏窗口启动，并在完全断网下正常工作。'
                   : '2. Launches as a standalone window from Windows Start Menu and works fully offline.'}
               </p>
               <p>

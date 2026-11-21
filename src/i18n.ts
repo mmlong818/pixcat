@@ -1,4 +1,4 @@
-import { AcdLabel, AssetType, Language } from './types/refto';
+import { AcdLabel, AssetType, Language } from './types/library';
 
 export const ACD_LABELS: Array<{
   id: AcdLabel;
@@ -15,7 +15,7 @@ export const ACD_LABELS: Array<{
 
 export const copy = {
   zh: {
-    appName: 'Refto',
+    appName: 'PixCat',
     appEdition: 'Windows 离线版',
     searchPlaceholder: '搜索图片、标签、色值、文件名或路径…',
     library: '参考库',
@@ -94,7 +94,7 @@ export const copy = {
     } as Record<AssetType, string>,
   },
   en: {
-    appName: 'Refto',
+    appName: 'PixCat',
     appEdition: 'Windows Offline',
     searchPlaceholder: 'Search images, tags, hex colors, filenames, or paths…',
     library: 'Library',

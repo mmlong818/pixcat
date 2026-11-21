@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Columns2, SplitSquareHorizontal, ZoomIn, ZoomOut } from 'lucide-react';
-import { Language, ReferenceItem } from '../types/refto';
+import { Language, ReferenceItem } from '../types/library';
 import { formatBytes } from '../utils/storage';
 
 interface CompareModalProps {

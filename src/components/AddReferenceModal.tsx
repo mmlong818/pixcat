@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, UploadCloud, Globe, FileText } from 'lucide-react';
-import { AssetType, Collection, Language } from '../types/refto';
+import { AssetType, Collection, Language } from '../types/library';
 
 interface AddReferenceModalProps {
   open: boolean;
@@ -217,7 +217,7 @@ export const AddReferenceModal: React.FC<AddReferenceModalProps> = ({
                       required
                       value={sourceUrl}
                       onChange={(e) => setSourceUrl(e.target.value)}
-                      placeholder="https://refto.one"
+                      placeholder="https://example.com"
                       className="w-full h-9 px-3 text-xs rounded-[5px] bg-neutral-50 dark:bg-[#1f1f1f] border border-black/10 dark:border-white/10 focus:outline-none focus:border-[#0067C0]"
                     />
                   </div>

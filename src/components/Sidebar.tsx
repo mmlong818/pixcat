@@ -23,7 +23,7 @@ import {
   Language,
   LocalFolder,
   ReferenceItem,
-} from '../types/refto';
+} from '../types/library';
 import { COLOR_FILTERS } from '../data/seedLibrary';
 import { ACD_LABELS, t } from '../i18n';
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { X, FileEdit, RefreshCw } from 'lucide-react';
-import { DEFAULT_ADJUSTMENTS, Language, ReferenceItem } from '../types/refto';
+import { DEFAULT_ADJUSTMENTS, Language, ReferenceItem } from '../types/library';
 import {
   canvasToBlob,
   renderAdjustedCanvas,

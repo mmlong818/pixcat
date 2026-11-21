@@ -9,7 +9,7 @@ import {
   UploadCloud,
   RotateCcw,
 } from 'lucide-react';
-import { Collection, Language, ReferenceItem, ViewMode } from '../types/refto';
+import { Collection, Language, ReferenceItem, ViewMode } from '../types/library';
 import { formatBytes } from '../utils/storage';
 import { ACD_LABELS, t } from '../i18n';
 
@@ -228,7 +228,7 @@ export const ReferenceGallery: React.FC<ReferenceGalleryProps> = ({
       <div className="aspect-[4/3] bg-neutral-100 dark:bg-[#1c1f24] p-5 flex flex-col justify-between">
         <Globe className="w-6 h-6 text-[#0067C0] dark:text-[#4CC2FF]" />
         <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate">
-          {item.domain || item.sourceUrl || 'refto.one'}
+          {item.domain || item.sourceUrl || 'pixcat.local'}
         </div>
       </div>
     );

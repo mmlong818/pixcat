@@ -15,8 +15,8 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png'],
         manifest: {
           id: '/',
-          name: 'Refto for Windows — 离线极速看图与视觉管理库',
-          short_name: 'Refto',
+          name: 'PixCat — Windows 离线极速看图与视觉管理库',
+          short_name: 'PixCat',
           description:
             'Windows 11 离线视觉参考库与 ACDSee 风格极速看图、本地文件夹管理与批处理工具。',
           theme_color: '#f3f3f3',

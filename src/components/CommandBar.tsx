@@ -13,7 +13,7 @@ import {
   Columns2,
   Wand2,
 } from 'lucide-react';
-import { Language, SortMode, ViewMode } from '../types/refto';
+import { Language, SortMode, ViewMode } from '../types/library';
 import { t } from '../i18n';
 
 interface CommandBarProps {

@@ -1,6 +1,6 @@
-import { Collection, ReferenceItem } from '../types/refto';
+import { Collection, ReferenceItem } from '../types/library';
 
-const DB_NAME = 'refto_windows_local_db';
+const DB_NAME = 'pixcat_windows_local_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'workspace';
 

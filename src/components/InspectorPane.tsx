@@ -11,7 +11,7 @@ import {
   Pause,
   FileText,
 } from 'lucide-react';
-import { AcdLabel, Collection, Language, ReferenceItem } from '../types/refto';
+import { AcdLabel, Collection, Language, ReferenceItem } from '../types/library';
 import { formatBytes } from '../utils/storage';
 import { ACD_LABELS, t } from '../i18n';
 

@@ -3,7 +3,7 @@ import {
   ImageAdjustments,
   LocalFolder,
   ReferenceItem,
-} from '../types/refto';
+} from '../types/library';
 import { extractColorsFromImage, getImageDimensions } from './storage';
 
 export type CropAspect = 'free' | '1:1' | '4:3' | '16:9' | '3:2';

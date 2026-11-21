@@ -9,7 +9,7 @@ import {
   SortMode,
   ViewMode,
   WindowState,
-} from './types/refto';
+} from './types/library';
 import {
   COLOR_FILTERS,
   INITIAL_COLLECTIONS,
@@ -659,7 +659,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `refto-windows-library-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `pixcat-windows-library-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     notify(lang === 'zh' ? '已导出本地参考库备份' : 'Exported library backup');
@@ -760,7 +760,7 @@ export default function App() {
               </svg>
             </div>
             <span className="text-xs font-medium text-neutral-800 dark:text-neutral-100 drop-shadow-xs">
-              Refto
+              PixCat
             </span>
           </button>
         </div>
@@ -780,11 +780,11 @@ export default function App() {
             <span>
               {windowState === 'minimized'
                 ? lang === 'zh'
-                  ? '还原 Refto 窗口'
-                  : 'Restore Refto'
+                  ? '还原 PixCat 窗口'
+                  : 'Restore PixCat'
                 : lang === 'zh'
-                  ? '启动 Refto for Windows'
-                  : 'Launch Refto for Windows'}
+                  ? '启动 PixCat'
+                  : 'Launch PixCat'}
             </span>
           </button>
         </div>

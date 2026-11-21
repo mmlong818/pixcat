@@ -9,7 +9,7 @@ import {
   Monitor,
   CornerDownLeft,
 } from 'lucide-react';
-import { ActiveNav, Collection, Language, ReferenceItem } from '../types/refto';
+import { ActiveNav, Collection, Language, ReferenceItem } from '../types/library';
 import { t } from '../i18n';
 
 interface CommandPaletteModalProps {

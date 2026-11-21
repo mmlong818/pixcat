@@ -7,7 +7,7 @@ import {
   Trash2,
   FolderInput,
 } from 'lucide-react';
-import { Collection, Language, ReferenceItem } from '../types/refto';
+import { Collection, Language, ReferenceItem } from '../types/library';
 import { t } from '../i18n';
 
 interface ContextMenuProps {

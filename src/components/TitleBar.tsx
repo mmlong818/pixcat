@@ -14,7 +14,7 @@ import {
   Download,
   WifiOff,
 } from 'lucide-react';
-import { Language, WindowState } from '../types/refto';
+import { Language, WindowState } from '../types/library';
 import { t } from '../i18n';
 
 interface TitleBarProps {

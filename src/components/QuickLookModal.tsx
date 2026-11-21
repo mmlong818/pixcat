@@ -29,7 +29,7 @@ import {
   ImageAdjustments,
   Language,
   ReferenceItem,
-} from '../types/refto';
+} from '../types/library';
 import { formatBytes } from '../utils/storage';
 import {
   canvasToBlob,
