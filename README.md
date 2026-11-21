@@ -1,4 +1,4 @@
-# PixCat (`pix-win-cat`)
+# PixCat (`pixcat`)
 
 Windows 11 Fluent Design 风格的离线极速看图与视觉参考管理工作台（支持 ACDSee 核心看图、本地磁盘直连、调色裁剪与批处理）。
 
