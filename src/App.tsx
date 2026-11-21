@@ -5,9 +5,12 @@ import {
   Collection,
   Language,
   LocalFolder,
+  PoseWearCategory,
   PoseWearItemOverride,
   ReferenceItem,
   SortMode,
+  VaultMediaStats,
+  VaultStatus,
   ViewMode,
   WindowState,
 } from './types/library';
@@ -21,8 +24,10 @@ import {
   extractColorsFromImage,
   getImageDimensions,
   hexDistance,
+  loadVaultHandle,
   loadWorkspace,
   readFileAsDataUrl,
+  saveVaultHandle,
   saveWorkspace,
 } from './utils/storage';
 import {
@@ -30,6 +35,22 @@ import {
   pickLocalDirectoryViaFS,
 } from './utils/imageOps';
 import { loadPoseWearDatasets } from './utils/posewearLoader';
+import {
+  deleteAssetFileFromVault,
+  downloadPoseWearMediaToVault,
+  exportVaultAsZip,
+  importVaultFromZip,
+  LoadedVaultData,
+  migrateItemsToVaultAssets,
+  pickVaultDirectory,
+  readVaultFromFileList,
+  readVaultFromHandle,
+  syncPoseWearJsonToVault,
+  VaultDirHandleLike,
+  verifyVaultPermission,
+  writeAssetFileToVault,
+  writeVaultConfig,
+} from './utils/vaultFs';
 import { playSynthPreset, stopSynthAudio } from './utils/audioSynth';
 import { useOnlineStatus, usePWAInstall } from './hooks/usePWA';
 import { ACD_LABELS, t } from './i18n';
@@ -95,7 +116,27 @@ export default function App() {
     item: ReferenceItem;
   } | null>(null);
 
+  const [vaultHandle, setVaultHandle] = useState<VaultDirHandleLike | null>(null);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus>('none');
+  const [vaultStats, setVaultStats] = useState<VaultMediaStats | null>(null);
+  const [localMediaUrls, setLocalMediaUrls] = useState<Map<string, string>>(
+    () => new Map()
+  );
+  const [customPoseWearRaw, setCustomPoseWearRaw] = useState<
+    Partial<Record<PoseWearCategory, unknown>>
+  >({});
+  const [zipBusyMessage, setZipBusyMessage] = useState<string | null>(null);
+  const [mediaSync, setMediaSync] = useState({
+    active: false,
+    done: 0,
+    total: 0,
+    currentFile: '',
+  });
+
   const dirInputRef = useRef<HTMLInputElement>(null);
+  const vaultFallbackInputRef = useRef<HTMLInputElement>(null);
+  const mediaSyncAbortRef = useRef<AbortController | null>(null);
+  const suppressVaultWriteRef = useRef(false);
   const strings = t(lang);
 
   const items = useMemo(
@@ -107,9 +148,77 @@ export default function App() {
     setToast(msg);
   }, []);
 
+  const reloadPoseWearBundle = useCallback(
+    async (
+      overrides: Record<string, PoseWearItemOverride>,
+      raw: Partial<Record<PoseWearCategory, unknown>>,
+      mediaMap: Map<string, string>
+    ) => {
+      try {
+        const bundle = await loadPoseWearDatasets(overrides, {
+          customRaw: raw,
+          localMediaUrls: mediaMap,
+        });
+        const combined = [
+          ...bundle.pose,
+          ...bundle.depth,
+          ...bundle.costume,
+          ...bundle.anime,
+          ...bundle.portrait,
+        ];
+        setPosewearItems(combined);
+        return combined;
+      } catch {
+        return [];
+      }
+    },
+    []
+  );
+
+  const applyLoadedVault = useCallback(
+    async (
+      loaded: LoadedVaultData,
+      handle: VaultDirHandleLike | null,
+      status: VaultStatus
+    ) => {
+      suppressVaultWriteRef.current = true;
+      const nextOverrides = loaded.config?.posewearOverrides || {};
+      if (loaded.config) {
+        setCustomItems(loaded.items);
+        if (Array.isArray(loaded.config.collections) && loaded.config.collections.length > 0) {
+          setCollections(loaded.config.collections);
+        }
+        setPosewearOverrides(nextOverrides);
+        if (loaded.config.settings?.lang) setLang(loaded.config.settings.lang);
+        if (typeof loaded.config.settings?.dark === 'boolean') {
+          setDark(loaded.config.settings.dark);
+        }
+        if (typeof loaded.config.settings?.showAdult === 'boolean') {
+          setShowAdult(loaded.config.settings.showAdult);
+        }
+      }
+      setVaultHandle(handle);
+      setVaultStatus(status);
+      setVaultStats(loaded.stats);
+      setLocalMediaUrls(loaded.localMediaUrls);
+      setCustomPoseWearRaw(loaded.customPoseWearRaw);
+
+      await reloadPoseWearBundle(
+        nextOverrides,
+        loaded.customPoseWearRaw,
+        loaded.localMediaUrls
+      );
+
+      window.setTimeout(() => {
+        suppressVaultWriteRef.current = false;
+      }, 600);
+    },
+    [reloadPoseWearBundle]
+  );
+
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2600);
+    const timer = window.setTimeout(() => setToast(null), 2800);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -119,48 +228,109 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    loadWorkspace().then(async (stored) => {
+    (async () => {
+      const [stored, savedHandle] = await Promise.all([
+        loadWorkspace(),
+        loadVaultHandle(),
+      ]);
       if (!mounted) return;
-      if (stored && Array.isArray(stored.items) && stored.items.length > 0) {
-        setCustomItems(stored.items);
-      }
-      if (
-        stored &&
-        Array.isArray(stored.collections) &&
-        stored.collections.length > 0
-      ) {
-        setCollections(stored.collections);
-      }
-      const overrides = stored?.posewearOverrides || {};
-      setPosewearOverrides(overrides);
-      setHydrated(true);
 
-      try {
-        const bundle = await loadPoseWearDatasets(overrides);
+      let activeOverrides = stored?.posewearOverrides || {};
+      let activeRaw: Partial<Record<PoseWearCategory, unknown>> = {};
+      let activeMediaMap = new Map<string, string>();
+      let vaultApplied = false;
+
+      if (savedHandle) {
+        const handleLike = savedHandle as VaultDirHandleLike;
+        const perm = await verifyVaultPermission(handleLike, false);
         if (!mounted) return;
-        const combined = [
-          ...bundle.pose,
-          ...bundle.depth,
-          ...bundle.costume,
-          ...bundle.anime,
-          ...bundle.portrait,
-        ];
-        setPosewearItems(combined);
-        const firstSafePose = bundle.pose.find((p) => !p.isAdult) || bundle.pose[0];
-        if (firstSafePose) {
-          setSelectedId(firstSafePose.id);
+        if (perm === 'granted') {
+          try {
+            const loaded = await readVaultFromHandle(handleLike);
+            if (!mounted) return;
+            if (loaded.config) {
+              suppressVaultWriteRef.current = true;
+              setCustomItems(loaded.items);
+              if (
+                Array.isArray(loaded.config.collections) &&
+                loaded.config.collections.length > 0
+              ) {
+                setCollections(loaded.config.collections);
+              }
+              activeOverrides = loaded.config.posewearOverrides || {};
+              setPosewearOverrides(activeOverrides);
+              if (loaded.config.settings?.lang) setLang(loaded.config.settings.lang);
+              if (typeof loaded.config.settings?.dark === 'boolean') {
+                setDark(loaded.config.settings.dark);
+              }
+              if (typeof loaded.config.settings?.showAdult === 'boolean') {
+                setShowAdult(loaded.config.settings.showAdult);
+              }
+              window.setTimeout(() => {
+                suppressVaultWriteRef.current = false;
+              }, 600);
+            } else if (stored?.items && stored.items.length > 0) {
+              setCustomItems(stored.items);
+              if (stored.collections?.length) setCollections(stored.collections);
+              setPosewearOverrides(activeOverrides);
+            }
+            activeRaw = loaded.customPoseWearRaw;
+            activeMediaMap = loaded.localMediaUrls;
+            setVaultHandle(handleLike);
+            setVaultStatus('connected');
+            setVaultStats(loaded.stats);
+            setLocalMediaUrls(activeMediaMap);
+            setCustomPoseWearRaw(activeRaw);
+            vaultApplied = true;
+          } catch {
+            // Fall through to workspace
+          }
+        } else {
+          setVaultHandle(handleLike);
+          setVaultStatus('prompt');
+          setVaultStats({
+            folderName: handleLike.name,
+            assetsCount: 0,
+            mediaFilesCount: 0,
+            hasPoseWearData: false,
+          });
         }
-      } catch {
-        // PoseWear datasets unavailable offline before precache
       }
-    });
+
+      if (!vaultApplied) {
+        if (stored && Array.isArray(stored.items) && stored.items.length > 0) {
+          setCustomItems(stored.items);
+        }
+        if (
+          stored &&
+          Array.isArray(stored.collections) &&
+          stored.collections.length > 0
+        ) {
+          setCollections(stored.collections);
+        }
+        setPosewearOverrides(activeOverrides);
+      }
+
+      setHydrated(true);
+      const combined = await reloadPoseWearBundle(
+        activeOverrides,
+        activeRaw,
+        activeMediaMap
+      );
+      if (!mounted) return;
+      const firstSafePose = combined.find((p) => !p.isAdult) || combined[0];
+      if (firstSafePose) {
+        setSelectedId(firstSafePose.id);
+      }
+    })();
+
     return () => {
       mounted = false;
       stopSynthAudio();
     };
-  }, []);
+  }, [reloadPoseWearBundle]);
 
-  // Persist custom items, collections, and PoseWear user overrides (exclude transient ObjectURL disk mounts)
+  // Persist custom items, collections, and PoseWear user overrides to IndexedDB
   useEffect(() => {
     if (!hydrated) return;
     const persistentItems = customItems.filter((i) => !i.localFolderId);
@@ -171,6 +341,37 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     });
   }, [customItems, collections, posewearOverrides, hydrated]);
+
+  // Real-time sync of pixcat.config.json when a writable Vault folder is connected
+  useEffect(() => {
+    if (
+      !hydrated ||
+      vaultStatus !== 'connected' ||
+      !vaultHandle ||
+      suppressVaultWriteRef.current
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      writeVaultConfig(vaultHandle, {
+        collections,
+        items: customItems,
+        posewearOverrides,
+        settings: { lang, dark, showAdult },
+      }).catch(() => {});
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    hydrated,
+    vaultStatus,
+    vaultHandle,
+    collections,
+    customItems,
+    posewearOverrides,
+    lang,
+    dark,
+    showAdult,
+  ]);
 
   const navigateTo = useCallback(
     (next: ActiveNav) => {
@@ -391,10 +592,27 @@ export default function App() {
       const colId = targetColId || activeCollectionId;
       const created: ReferenceItem[] = [];
 
+      const persistentVaultHandle =
+        vaultStatus === 'connected' && vaultHandle ? vaultHandle : null;
+
       for (const file of files) {
         const mime = file.type;
         const cleanName = file.name.replace(/\.[^/.]+$/, '');
         const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        let vaultPath: string | undefined;
+
+        if (persistentVaultHandle) {
+          try {
+            vaultPath = await writeAssetFileToVault(
+              persistentVaultHandle,
+              id,
+              cleanName || 'asset',
+              file
+            );
+          } catch {
+            // Keep inline fallback if write fails
+          }
+        }
 
         if (mime.startsWith('image/')) {
           const dataUrl = await readFileAsDataUrl(file);
@@ -407,6 +625,7 @@ export default function App() {
             title: cleanName || (lang === 'zh' ? '剪贴板截图' : 'Pasted Image'),
             type: 'ui',
             imageUrl: dataUrl,
+            vaultPath,
             collectionId: colId,
             tags: [lang === 'zh' ? '本地导入' : 'Local Import'],
             colors,
@@ -426,6 +645,7 @@ export default function App() {
             type: 'motion',
             mediaUrl: dataUrl,
             mediaMime: mime,
+            vaultPath,
             collectionId: colId,
             tags: ['Video'],
             colors: ['#1F2428', '#0067C0', '#8A949E'],
@@ -445,6 +665,7 @@ export default function App() {
             type: 'audio',
             mediaUrl: dataUrl,
             mediaMime: mime,
+            vaultPath,
             collectionId: colId,
             tags: ['Audio'],
             colors: ['#0067C0', '#4CC2FF', '#1F2428'],
@@ -462,6 +683,7 @@ export default function App() {
             id,
             title: cleanName,
             type: 'doc',
+            vaultPath,
             collectionId: colId,
             tags: ['Document'],
             colors: ['#F3F3F3', '#0067C0', '#202020'],
@@ -480,14 +702,25 @@ export default function App() {
       if (created.length > 0) {
         setCustomItems((prev) => [...created, ...prev]);
         setSelectedId(created[0].id);
+        if (persistentVaultHandle) {
+          setVaultStats((prev) =>
+            prev
+              ? { ...prev, assetsCount: prev.assetsCount + created.length }
+              : prev
+          );
+        }
         notify(
-          lang === 'zh'
-            ? `已将 ${created.length} 项素材保存至本地库`
-            : `Saved ${created.length} asset(s) to local library`
+          persistentVaultHandle
+            ? lang === 'zh'
+              ? `已将 ${created.length} 项文件写入资源目录`
+              : `Saved ${created.length} file(s) to Vault directory`
+            : lang === 'zh'
+              ? `已将 ${created.length} 项素材保存至本地库`
+              : `Saved ${created.length} asset(s) to local library`
         );
       }
     },
-    [activeCollectionId, lang, notify]
+    [activeCollectionId, lang, notify, vaultHandle, vaultStatus]
   );
 
   const handleUpdateItem = useCallback(
@@ -546,13 +779,17 @@ export default function App() {
           [id]: { ...(prev[id] || {}), hidden: true },
         }));
       } else {
+        const target = customItems.find((i) => i.id === id);
+        if (target?.vaultPath && vaultHandle && vaultStatus === 'connected') {
+          deleteAssetFileFromVault(vaultHandle, target.vaultPath).catch(() => {});
+        }
         setCustomItems((prev) => prev.filter((i) => i.id !== id));
       }
       if (selectedId === id) setSelectedId(null);
       setCheckedIds((prev) => prev.filter((x) => x !== id));
       notify(lang === 'zh' ? '已从参考库移除' : 'Removed from library');
     },
-    [selectedId, lang, notify]
+    [selectedId, lang, notify, customItems, vaultHandle, vaultStatus]
   );
 
   // Global keyboard shortcuts (Ctrl+K, Space QuickLook, 1-5 Rating, Ctrl+V Paste, Delete)
@@ -701,15 +938,29 @@ export default function App() {
   );
 
   const handleSaveEditedCopy = useCallback(
-    (source: ReferenceItem, dataUrl: string, sizeBytes: number, dimensions: string) => {
+    async (source: ReferenceItem, dataUrl: string, sizeBytes: number, dimensions: string) => {
+      const id = `ref-${Date.now()}`;
+      const title = `${source.title} (${lang === 'zh' ? '已编辑' : 'Edited'})`;
+      let vaultPath: string | undefined;
+
+      if (vaultStatus === 'connected' && vaultHandle) {
+        try {
+          const blob = await fetch(dataUrl).then((r) => r.blob());
+          vaultPath = await writeAssetFileToVault(vaultHandle, id, title, blob);
+        } catch {
+          // keep inline
+        }
+      }
+
       const copyItem: ReferenceItem = {
         ...source,
         posewearCat: undefined,
         angles: undefined,
-        id: `ref-${Date.now()}`,
-        title: `${source.title} (${lang === 'zh' ? '已编辑' : 'Edited'})`,
+        id,
+        title,
         imageUrl: dataUrl,
         highResUrl: dataUrl,
+        vaultPath,
         localFolderId: undefined,
         dimensions,
         fileSizeBytes: sizeBytes,
@@ -720,7 +971,7 @@ export default function App() {
       setQuickLookId(copyItem.id);
       setSelectedId(copyItem.id);
     },
-    [lang]
+    [lang, vaultHandle, vaultStatus]
   );
 
   const handleCreateCollection = useCallback(
@@ -836,19 +1087,261 @@ export default function App() {
     setCustomItems(INITIAL_ITEMS);
     setCollections(INITIAL_COLLECTIONS);
     setPosewearOverrides({});
-    const bundle = await loadPoseWearDatasets({}).catch(() => null);
-    if (bundle) {
-      setPosewearItems([
-        ...bundle.pose,
-        ...bundle.depth,
-        ...bundle.costume,
-        ...bundle.anime,
-        ...bundle.portrait,
-      ]);
-    }
+    await reloadPoseWearBundle({}, customPoseWearRaw, localMediaUrls);
     setSelectedId(INITIAL_ITEMS[0].id);
     notify(lang === 'zh' ? '已恢复默认示例库' : 'Reset to default library');
   };
+
+  // --- Portable Resource Vault Handlers ---
+  const handleMapVaultDirectory = useCallback(async () => {
+    try {
+      const handle = await pickVaultDirectory();
+      if (!handle) {
+        notify(
+          lang === 'zh'
+            ? '当前浏览器不支持直接读写映射，已为您打开兼容目录导入'
+            : 'Directory picker unsupported; opening folder import fallback'
+        );
+        vaultFallbackInputRef.current?.click();
+        return;
+      }
+
+      await saveVaultHandle(handle);
+      const loaded = await readVaultFromHandle(handle);
+
+      if (loaded.config) {
+        await applyLoadedVault(loaded, handle, 'connected');
+        notify(
+          lang === 'zh'
+            ? `已映射并载入资源目录「${handle.name}」（${loaded.items.length} 个自建资源，${loaded.stats.mediaFilesCount} 张离线图片）`
+            : `Mapped & loaded Vault "${handle.name}" (${loaded.items.length} items)`
+        );
+      } else {
+        notify(
+          lang === 'zh'
+            ? `正在初始化资源目录「${handle.name}」…`
+            : `Initializing Vault "${handle.name}"…`
+        );
+        const migratedItems = await migrateItemsToVaultAssets(handle, customItems);
+        await syncPoseWearJsonToVault(handle);
+        await writeVaultConfig(handle, {
+          collections,
+          items: migratedItems,
+          posewearOverrides,
+          settings: { lang, dark, showAdult },
+        });
+        const refreshed = await readVaultFromHandle(handle);
+        await applyLoadedVault(
+          {
+            ...refreshed,
+            items: migratedItems,
+          },
+          handle,
+          'connected'
+        );
+        notify(
+          lang === 'zh'
+            ? `已完成目录初始化「${handle.name}」，之后可随时打包分享！`
+            : `Initialized Vault "${handle.name}"`
+        );
+      }
+    } catch (err) {
+      const name = (err as Error)?.name;
+      if (name === 'AbortError') return;
+      notify(
+        lang === 'zh'
+          ? '预览窗口受限于沙盒环境，已自动切换为「载入已解压目录」兼容模式'
+          : 'Sandbox iframe restricts write access; switching to folder import fallback'
+      );
+      vaultFallbackInputRef.current?.click();
+    }
+  }, [
+    applyLoadedVault,
+    collections,
+    customItems,
+    dark,
+    lang,
+    notify,
+    posewearOverrides,
+    showAdult,
+  ]);
+
+  const handleReconnectVault = useCallback(async () => {
+    if (!vaultHandle) return;
+    const perm = await verifyVaultPermission(vaultHandle, true);
+    if (perm === 'granted') {
+      const loaded = await readVaultFromHandle(vaultHandle);
+      if (loaded.config) {
+        await applyLoadedVault(loaded, vaultHandle, 'connected');
+      } else {
+        setVaultStatus('connected');
+        setVaultStats(loaded.stats);
+      }
+      notify(
+        lang === 'zh'
+          ? `已恢复目录「${vaultHandle.name}」读写同步`
+          : `Reconnected "${vaultHandle.name}"`
+      );
+    } else {
+      notify(
+        lang === 'zh'
+          ? '未授予目录读写权限，可重新点击「映射本地资源目录」'
+          : 'Permission denied'
+      );
+    }
+  }, [applyLoadedVault, lang, notify, vaultHandle]);
+
+  const handleDisconnectVault = useCallback(async () => {
+    await saveVaultHandle(null);
+    setVaultHandle(null);
+    setVaultStatus('none');
+    setVaultStats(null);
+    const emptyMap = new Map<string, string>();
+    setLocalMediaUrls(emptyMap);
+    setCustomPoseWearRaw({});
+    await reloadPoseWearBundle(posewearOverrides, {}, emptyMap);
+    notify(lang === 'zh' ? '已断开固定资源目录映射' : 'Disconnected Vault folder');
+  }, [lang, notify, posewearOverrides, reloadPoseWearBundle]);
+
+  const handleImportVaultFolder = useCallback(
+    async (fileList: FileList) => {
+      try {
+        const loaded = await readVaultFromFileList(fileList);
+        if (!loaded.config && !loaded.stats.hasPoseWearData && loaded.stats.assetsCount === 0) {
+          notify(
+            lang === 'zh'
+              ? '所选目录中未找到 pixcat.config.json 或有效资源文件'
+              : 'No pixcat.config.json or valid vault files found in folder'
+          );
+          return;
+        }
+        await applyLoadedVault(loaded, null, 'readonly-import');
+        notify(
+          lang === 'zh'
+            ? `已从目录「${loaded.stats.folderName}」载入 ${loaded.items.length} 项资源与 ${loaded.stats.mediaFilesCount} 张离线图片`
+            : `Loaded ${loaded.items.length} items from "${loaded.stats.folderName}"`
+        );
+      } catch {
+        notify(lang === 'zh' ? '载入目录失败，请确认目录完整' : 'Failed to load folder');
+      }
+    },
+    [applyLoadedVault, lang, notify]
+  );
+
+  const handleExportVaultZip = useCallback(async () => {
+    try {
+      setZipBusyMessage(lang === 'zh' ? '正在打包…' : 'Packing…');
+      const blob = await exportVaultAsZip({
+        vaultHandle: vaultStatus === 'connected' ? vaultHandle : null,
+        items: customItems,
+        collections,
+        posewearOverrides,
+        settings: { lang, dark, showAdult },
+        includePoseWearJson: true,
+        onProgress: (msg) => setZipBusyMessage(msg),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PixCatVault-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notify(lang === 'zh' ? '已导出完整资源包 (.zip)' : 'Exported complete Vault (.zip)');
+    } catch {
+      notify(lang === 'zh' ? '导出 ZIP 压缩包失败' : 'Failed to export ZIP');
+    } finally {
+      setZipBusyMessage(null);
+    }
+  }, [
+    collections,
+    customItems,
+    dark,
+    lang,
+    notify,
+    posewearOverrides,
+    showAdult,
+    vaultHandle,
+    vaultStatus,
+  ]);
+
+  const handleImportVaultZip = useCallback(
+    async (file: File) => {
+      try {
+        setZipBusyMessage(lang === 'zh' ? '正在解压资源包…' : 'Extracting .zip…');
+        const loaded = await importVaultFromZip(file);
+        if (!loaded.config && !loaded.stats.hasPoseWearData) {
+          notify(
+            lang === 'zh'
+              ? 'ZIP 包中未包含有效的 PixCat 配置文件'
+              : 'No valid PixCat vault found in ZIP'
+          );
+          return;
+        }
+        await applyLoadedVault(loaded, null, 'readonly-import');
+        notify(
+          lang === 'zh'
+            ? `已从压缩包载入 ${loaded.items.length} 项资源与 ${loaded.stats.mediaFilesCount} 张离线图片`
+            : `Imported ${loaded.items.length} items from ZIP`
+        );
+      } catch {
+        notify(lang === 'zh' ? 'ZIP 资源包解析失败' : 'Failed to extract ZIP');
+      } finally {
+        setZipBusyMessage(null);
+      }
+    },
+    [applyLoadedVault, lang, notify]
+  );
+
+  const handleDownloadPoseWearToVault = useCallback(
+    async (categories: PoseWearCategory[]) => {
+      if (vaultStatus !== 'connected' || !vaultHandle) {
+        notify(
+          lang === 'zh'
+            ? '请先在上方点击「映射本地资源目录」指定写入文件夹'
+            : 'Please map a writable local Vault folder first'
+        );
+        return;
+      }
+      const controller = new AbortController();
+      mediaSyncAbortRef.current = controller;
+      setMediaSync({ active: true, done: 0, total: 0, currentFile: '' });
+
+      try {
+        const res = await downloadPoseWearMediaToVault(
+          vaultHandle,
+          categories,
+          (done, total, currentFile) => {
+            setMediaSync({ active: true, done, total, currentFile });
+          },
+          controller.signal
+        );
+        const refreshed = await readVaultFromHandle(vaultHandle);
+        setVaultStats(refreshed.stats);
+        setLocalMediaUrls(refreshed.localMediaUrls);
+        setCustomPoseWearRaw(refreshed.customPoseWearRaw);
+        await reloadPoseWearBundle(
+          posewearOverrides,
+          refreshed.customPoseWearRaw,
+          refreshed.localMediaUrls
+        );
+        notify(
+          lang === 'zh'
+            ? `同步完成：新下载 ${res.downloaded} 张，跳过已有 ${res.skipped} 张${res.failed > 0 ? `，失败 ${res.failed} 张` : ''}`
+            : `Synced: ${res.downloaded} downloaded, ${res.skipped} skipped`
+        );
+      } catch {
+        notify(lang === 'zh' ? '离线图片同步中断' : 'Media sync interrupted');
+      } finally {
+        setMediaSync({ active: false, done: 0, total: 0, currentFile: '' });
+        mediaSyncAbortRef.current = null;
+      }
+    },
+    [lang, notify, posewearOverrides, reloadPoseWearBundle, vaultHandle, vaultStatus]
+  );
+
+  const handleCancelMediaSync = useCallback(() => {
+    mediaSyncAbortRef.current?.abort();
+  }, []);
 
   const handleDownloadItem = (item: ReferenceItem) => {
     const href = item.originalUrl || item.highResUrl || item.imageUrl || item.mediaUrl;
@@ -980,6 +1473,20 @@ export default function App() {
           e.target.value = '';
         }}
       />
+      <input
+        ref={vaultFallbackInputRef}
+        type="file"
+        multiple
+        // @ts-expect-error webkitdirectory is standard in Chromium/WebKit
+        webkitdirectory=""
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            handleImportVaultFolder(e.target.files);
+          }
+          e.target.value = '';
+        }}
+      />
 
       <div
         className={`w-full h-full flex flex-col overflow-hidden win-mica-bg text-neutral-900 dark:text-neutral-100 ${
@@ -1017,6 +1524,32 @@ export default function App() {
           onCloseWindow={() => setWindowState('closed')}
           onToggleMobileSidebar={() => setMobileSidebarOpen((o) => !o)}
         />
+
+        {vaultStatus === 'prompt' && vaultHandle && (
+          <div className="px-4 py-2 bg-amber-500/12 border-b border-amber-500/25 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
+            <span>
+              {lang === 'zh'
+                ? `检测到上次映射的固定资源目录「${vaultHandle.name}」，点击恢复本地读写授权`
+                : `Previous Vault folder "${vaultHandle.name}" detected — grant access to resume disk sync`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReconnectVault}
+                className="h-6 px-2.5 rounded-[4px] bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+              >
+                {lang === 'zh' ? '立即恢复连接' : 'Reconnect'}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateTo({ kind: 'windows-info' })}
+                className="h-6 px-2 rounded-[4px] hover:bg-black/5 dark:hover:bg-white/10 font-medium"
+              >
+                {lang === 'zh' ? '目录设置' : 'Settings'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="relative flex-1 min-h-0 flex">
           <div className="hidden md:block h-full">
@@ -1079,10 +1612,22 @@ export default function App() {
                 isInstallable={isInstallable}
                 isInstalled={isInstalled}
                 offlineReady={offlineReady}
+                vaultStatus={vaultStatus}
+                vaultStats={vaultStats}
+                zipBusyMessage={zipBusyMessage}
+                mediaSync={mediaSync}
                 onInstallPWA={() => {
                   install();
                 }}
                 onMountLocalFolder={handleMountLocalFolder}
+                onMapVaultDirectory={handleMapVaultDirectory}
+                onReconnectVault={handleReconnectVault}
+                onDisconnectVault={handleDisconnectVault}
+                onImportVaultFolder={handleImportVaultFolder}
+                onExportVaultZip={handleExportVaultZip}
+                onImportVaultZip={handleImportVaultZip}
+                onDownloadPoseWearToVault={handleDownloadPoseWearToVault}
+                onCancelMediaSync={handleCancelMediaSync}
                 onExportBackup={handleExportBackup}
                 onImportBackup={handleImportBackup}
                 onResetLibrary={handleResetLibrary}

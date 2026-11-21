@@ -1,8 +1,9 @@
 import { Collection, PoseWearItemOverride, ReferenceItem } from '../types/library';
 
 const DB_NAME = 'pixcat_windows_local_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'workspace';
+const HANDLE_STORE = 'handles';
 
 export interface StoredWorkspace {
   items: ReferenceItem[];
@@ -19,10 +20,46 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
       }
+      if (!db.objectStoreNames.contains(HANDLE_STORE)) {
+        db.createObjectStore(HANDLE_STORE);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+export async function saveVaultHandle(
+  handle: FileSystemDirectoryHandle | null
+): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(HANDLE_STORE, 'readwrite');
+      const store = tx.objectStore(HANDLE_STORE);
+      const req = handle ? store.put(handle, 'vault') : store.delete('vault');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    // Ignore if structured cloning of handles is unavailable
+  }
+}
+
+export async function loadVaultHandle(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(HANDLE_STORE, 'readonly');
+      const store = tx.objectStore(HANDLE_STORE);
+      const req = store.get('vault');
+      req.onsuccess = () =>
+        resolve((req.result as FileSystemDirectoryHandle) || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function loadWorkspace(): Promise<StoredWorkspace | null> {

@@ -72,6 +72,7 @@ export interface ReferenceItem {
   collectionId: string;
   localFolderId?: string;
   relativePath?: string;
+  vaultPath?: string;
   tags: string[];
   keywords?: string[];
   colors: string[];
@@ -117,4 +118,27 @@ export interface Collection {
   nameEn: string;
   descriptionZh: string;
   descriptionEn: string;
+}
+
+export type VaultStatus = 'none' | 'prompt' | 'connected' | 'readonly-import';
+
+export interface VaultMediaStats {
+  folderName: string;
+  assetsCount: number;
+  mediaFilesCount: number;
+  hasPoseWearData: boolean;
+}
+
+export interface VaultConfig {
+  version: 1;
+  app: 'pixcat';
+  updatedAt: string;
+  collections: Collection[];
+  items: ReferenceItem[];
+  posewearOverrides: Record<string, PoseWearItemOverride>;
+  settings?: {
+    lang?: Language;
+    dark?: boolean;
+    showAdult?: boolean;
+  };
 }
