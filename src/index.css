@@ -1,0 +1,74 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+    --font-sans: 'DM Sans', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #eef1f5;
+    color: #1a1d21;
+    overflow: hidden;
+  }
+
+  .dark body {
+    background-color: #141619;
+    color: #f3f4f6;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Subtle Windows 11 Mica surface texture */
+.win-mica-bg {
+  background-color: #f3f3f3;
+  background-image:
+    radial-gradient(at 15% 10%, rgba(0, 103, 192, 0.055) 0px, transparent 50%),
+    radial-gradient(at 88% 82%, rgba(86, 118, 166, 0.05) 0px, transparent 48%);
+}
+
+.dark .win-mica-bg {
+  background-color: #202020;
+  background-image:
+    radial-gradient(at 18% 12%, rgba(76, 194, 255, 0.06) 0px, transparent 50%),
+    radial-gradient(at 85% 85%, rgba(0, 103, 192, 0.07) 0px, transparent 45%);
+}
+
+/* Windows 11 crisp thin scrollbars */
+.win-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.win-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.win-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 9999px;
+}
+.win-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+.dark .win-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+.dark .win-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

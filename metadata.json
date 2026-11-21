@@ -1,0 +1,6 @@
+{
+  "name": "Refto for Windows",
+  "description": "Windows 11 Fluent Design 创意视觉参考库与设计灵感工作台 — 本地优先管理网页截图、界面参考、动效视频、音频与设计规范文档。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
